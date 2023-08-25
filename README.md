@@ -1,1 +1,3 @@
-# fast-api-fundamentals
+# Fast API Fundamentals
+
+Following the Pluralsight course.
