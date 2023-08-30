@@ -1,18 +1,37 @@
-from fastapi import Depends, FastAPI
-from fastapi.exceptions import HTTPException
-from sqlmodel import SQLModel, Session, create_engine, select
+import time
+from starlette.responses import JSONResponse
+from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
 import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import SQLModel
 
-from schemas import Car, CarInput
-
+from db import engine
+from routers import cars, web
+from routers.cars import BadTripException
 
 app = FastAPI(title="Car Sharing")
 
-engine = create_engine(
-    "sqlite:///carsharing.db",
-    connect_args={"check_same_thread": False},
-    echo=True
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
 )
+
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+
+app.include_router(web.router)
+app.include_router(cars.router)
 
 
 @app.on_event("startup")
@@ -20,79 +39,13 @@ def on_startup():
     SQLModel.metadata.create_all(engine)
 
 
-def get_session():
-    with Session(engine) as session:
-        yield session
-
-
-@app.get("/api/cars")
-def get_cars(size: str | None = None, doors: int | None = None, session: Session = Depends(get_session)) -> list:
-    query = select(Car)
-    if size:
-        query = query.where(Car.size == size)
-    if doors:
-        query = query.where(Car.doors == doors)
-
-    return session.exec(query).all()
-
-
-@app.get("/api/cars/{id}", response_model=Car)
-def car_by_id(id: int, session: Session = Depends(get_session)) -> Car:
-    car = session.get(Car, id)
-    if car:
-        return car
-    else:
-        raise HTTPException(status_code=404, detail=f"No car with id={id}.")
+@app.exception_handler(BadTripException)
+async def unicorn_exception_handler(request: Request, exc: BadTripException):
+    return JSONResponse(
+        status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"message": "Bad Trip"}
+    )
 
 
 if __name__ == "__main__":
     uvicorn.run("carsharing:app", host="0.0.0.0", port=8000, reload=True)
-
-
-@app.post("/api/cars", response_model=Car)
-def add_car(car_input: CarInput, session: Session = Depends(get_session)) -> Car:
-    new_car = Car.from_orm(car_input)
-    session.add(new_car)
-    session.commit()
-    session.refresh(new_car)
-    return new_car
-
-
-@app.delete("/api/cars/{id}", status_code=204)
-def remove_car(id: int, session: Session = Depends(get_session)) -> None:
-    car = session.get(Car, id)
-
-    if car:
-        session.delete(car)
-        session.commit()
-    else:
-        raise HTTPException(status_code=404, detail=f"No car with id={id}")
-
-
-@app.put("/api/cars/{id}", response_model=Car)
-def change_care(id: int, new_data: CarInput, session: Session = Depends(get_session)) -> Car:
-    car = session.get(Car, id)
-
-    if car:
-        car.fuel = new_data.fuel
-        car.transmission = new_data.transmission
-        car.size = new_data.size
-        car.doors = new_data.doors
-        session.commit()
-        return car
-    else:
-        raise HTTPException(status_code=404, detail=f"No car with id={id}")
-
-
-# @app.post("/api/cars/{car_id}/trips", response_model=TripOutput)
-# def add_trip(car_id: int, trip: TripInput) -> TripOutput:
-#     matches = [car for car in db if car.id == car_id]
-
-#     if matches:
-#         car = matches[0]
-#         new_trip = TripOutput(id=len(car.trips) + 1, **trip.model_dump())
-#         car.trips.append(new_trip)
-#         save_db(db)
-#         return new_trip
-#     else:
-#         raise HTTPException(status_code=404, detail=f"No car with id={id}")
