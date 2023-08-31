@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
 from db import engine
-from routers import cars, web
+from routers import auth, cars, web
 from routers.cars import BadTripException
 
 app = FastAPI(title="Car Sharing")
@@ -32,6 +32,7 @@ async def add_process_time_header(request: Request, call_next):
 
 app.include_router(web.router)
 app.include_router(cars.router)
+app.include_router(auth.router)
 
 
 @app.on_event("startup")
